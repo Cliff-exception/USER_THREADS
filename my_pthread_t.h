@@ -46,7 +46,7 @@ typedef enum { READY, WAITING, RUNNING, EXITED } state;
 typedef uint my_pthread_t;
 
 // this helps us assign thread IDS and keep count of thread numbers 
-int thread_num = 0; 
+int number_of_threads = 0; 
 
 typedef struct threadControlBlock {
 
@@ -103,6 +103,8 @@ typedef struct ret_list {
 } ret_list;
 
 
+ my_pthread_mutex_t * count_lock;
+
 // a global list of all return values, when a thread exits, their return value gets added to this list 
 // a thread that wishes to join has to iterate through this list and get the return value
 ret_list * return_list; 
@@ -146,5 +148,8 @@ void init_main ();
 
 void schedule_threads(); // this function acts as the main scheduler, its job is to schedule threads, duh 
 tcb * search_by_tid ( my_pthread_t tid ); 
+void timer_interrupt () ; 
+tcb * get_tcb ();
+
 
 #endif

@@ -16,7 +16,7 @@ void init_main () {
     tcb * main_block = (tcb*)malloc(sizeof(tcb)); 
     main_block->thread_context = (ucontext_t*)malloc(sizeof(ucontext_t)); 
     main_block->priority = 0; 
-    main_block->tid = ++thread_num; 
+    main_block->tid = ++number_of_threads; 
     main_block->thread_state = RUNNING; 
     main_block->run_time = 0; 
 
@@ -25,7 +25,7 @@ void init_main () {
     current_thread = main_block; 
 
     // add main block to the queue of threads
-    Insert_to_qeueue(main_block); 
+   // Insert_to_qeueue(main_block); 
 }
 
 
@@ -71,6 +71,9 @@ int my_pthread_create(my_pthread_t * thread, pthread_attr_t * attr, void *(*func
         WaitQueue->tail = NULL; 
         my_queue_init(); // initialize queue
         init_main();     // initialize main context
+
+        count_lock = (my_pthread_mutex_t*)malloc(sizeof(my_pthread_mutex_t)); 
+        my_pthread_mutex_init(count_lock,NULL); 
     }
 
     // time to create the new thread
@@ -97,12 +100,25 @@ int my_pthread_create(my_pthread_t * thread, pthread_attr_t * attr, void *(*func
     new_thread->uc_stack.ss_flags = 0;  
     new_thread->uc_link = &exit_caller; 
 
+    if ( arg ) {
+
+        makecontext(new_thread, (void*)function, 1, arg); 
+    }
+
+    else {
+
+        makecontext(new_thread, (void*)function,0); 
+    }
+
     // create a thread control block for this thread
-    *thread = ++thread_num; 
+    my_pthread_mutex_lock(count_lock);
+    *thread = ++number_of_threads; 
+    my_pthread_mutex_unlock(count_lock); 
     tcb * block = (tcb*)malloc(sizeof(tcb)); 
     block->priority = 0; 
     block->thread_context = new_thread; 
     block->run_time = 0; 
+    block->join = 0; 
     block->thread_state = READY;
     block->tid = *thread;  
 
@@ -120,6 +136,7 @@ int my_pthread_create(my_pthread_t * thread, pthread_attr_t * attr, void *(*func
 /* give CPU pocession to other user level threads voluntarily */
 int my_pthread_yield() {
     // when going into the scheduler, we must first disable the timer
+ //    printf("yielding\n");
     struct itimerval timer; 
     getitimer(ITIMER_REAL, &timer); 
 
@@ -134,8 +151,137 @@ int my_pthread_yield() {
 
 void schedule_threads () {
 
+    struct itimerval timer; 
+    struct sigaction interrupt; 
+
+    tcb * context = get_running_thread(); 
+
+    //update the time quanta and modify priorities
+
+    if ( context-> priority == 0 ) {
+
+        context->run_time += 15; 
+
+    }
+
+    else if ( context->priority == 1 ) {
+
+        context->run_time += 30; 
+    }
+
+    // the priority is level 2
+    else {
+
+        context->run_time += 60; 
+
+        // priority boost
+        if ( context->run_time >= 225 ) {
+
+            context->priority = 0; 
+            context->run_time = 0; 
+        }
+    }
+
+    // check if the thread as exited and free all of its resources
+
+    if ( context->thread_state == EXITED ) {
+
+        free( context->thread_context->uc_stack.ss_sp);  // free the stack memory
+        free(context->thread_context); 
+        // may need to change
+        free(context);
+        context = NULL;              
+    }
 
 
+    else {
+        // only add back to run queue if the thread is not waiting for some IO
+        if ( context != NULL && context->thread_state != WAITING ) {
+
+            if ( context->priority < MAX_PRIORITY )
+                context->priority++; 
+
+            // put the context back into the queue
+            context->thread_state = READY;
+          Insert_to_qeueue(context);
+        }
+    }
+
+    // get the next thread to run /  initialize time
+    memset(&interrupt, 0, sizeof(interrupt)); 
+    interrupt.sa_handler = &timer_interrupt; 
+    sigaction(SIGALRM, &interrupt, NULL); 
+
+    tcb * to_run = get_tcb(); 
+
+    // no more threads to schedule
+    if ( to_run == NULL )
+        return; 
+
+    if ( to_run->priority == 0 ) {
+
+        timer.it_value.tv_sec = 0; 
+        timer.it_value.tv_usec = LEVEL1; 
+
+        timer.it_interval.tv_sec  = 0; 
+        timer.it_interval.tv_usec = LEVEL1; 
+    }
+
+
+    else if ( to_run->priority == 1 ) {
+
+        timer.it_value.tv_sec = 0; 
+        timer.it_value.tv_usec = LEVEL2; 
+
+        timer.it_interval.tv_sec  = 0; 
+        timer.it_interval.tv_usec = LEVEL2; 
+    }
+
+
+    else {
+
+        timer.it_value.tv_sec = 0; 
+        timer.it_value.tv_usec = LEVEL3; 
+
+        timer.it_interval.tv_sec  = 0; 
+        timer.it_interval.tv_usec = LEVEL3;
+    }
+
+    setitimer(ITIMER_REAL, &timer, NULL); 
+
+    // the current thread has not exited
+    if ( context != NULL ) {
+
+        current_thread = to_run; 
+        to_run->thread_state = RUNNING; 
+
+        printf("Swaping context between thread %d  and thread %d\n", context->tid, to_run->tid );
+
+        swapcontext(context->thread_context, to_run->thread_context); 
+    }
+
+    else {
+
+        current_thread = to_run; 
+        setcontext(to_run->thread_context); 
+    }
+
+
+
+}
+
+
+// responsible for catching interrupts
+void timer_interrupt () {
+    printf("Timer went off\n");
+    // when going into the scheduler, we must first disable the timer
+    struct itimerval timer; 
+    getitimer(ITIMER_REAL, &timer); 
+
+    timer.it_value.tv_usec = 0;
+    setitimer(ITIMER_REAL, &timer, NULL); 
+
+    schedule_threads(); 
 }
 
 
@@ -160,8 +306,10 @@ void my_pthread_exit(void *value_ptr) {
     }
 
     // put this thread onto the run queue
+    if ( ptr != NULL ){
     ptr->thread_state = READY; 
-    Insert_to_qeueue(ptr); 
+    Insert_to_qeueue(ptr);
+    } 
 
     // if the return value is null, just set its state to exited
     if ( value_ptr == NULL ) {
@@ -360,6 +508,8 @@ int my_pthread_mutex_destroy(my_pthread_mutex_t *mutex) {
     }
 
     mutex->destroyed = 1; 
+    mutex->owner = 0; 
+    mutex->initialized = 0; 
 
     return 0;
 };
@@ -460,7 +610,6 @@ tcb * search_by_tid ( my_pthread_t tid ) {
     return NULL; 
 }
 
-
 // gives a priority boost to all threads in the 
 void priority_boost () {
 
@@ -482,9 +631,58 @@ void priority_boost () {
 
 }
 
-int main(int argc, char const *argv[])
-{
+
+void * print( void * arg) {
+
+    long i = 0; 
+
+    while ( i < 50000000 ){
+
+        i++; 
+    }
+
+    printf("Hello from a simple function\n");
+
+   // my_pthread_exit(NULL); 
+    return NULL; 
+
+}
+
+void * print2 ( void * arg) {
+
+
+    long i = 0; 
+
+    while ( i < 70000000 ){
+
+        i++; 
+    }
+
+     printf("Hello from a simple function 2\n");
+
+   // my_pthread_exit(NULL); 
+    return NULL; 
+
+}
+
+/*
+
+int main(int argc, char const *argv[]) {
+
+    my_pthread_t tid; 
+    my_pthread_t tid2; 
+    printf("Hello from main\n");
+
+    void*(*fun)(void*) = &print; 
+    void*(*fun2)(void*) = &print2; 
+
+    my_pthread_create(&tid, NULL, fun, NULL); 
+    my_pthread_create(&tid2, NULL, fun2, NULL); 
+    my_pthread_join(tid, NULL); 
+    my_pthread_join(tid2,NULL); 
+
+    printf("Hello from main again\n");
     
     return 0;
 }
-
+  */
