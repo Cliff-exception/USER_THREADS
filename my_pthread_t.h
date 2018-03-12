@@ -25,6 +25,15 @@
 #include <sys/time.h>
 
 
+#define pthread_create(x, y, z, w) my_pthread_create(x, y, z, w)
+#define pthread_exit(x) my_pthread_exit(x)
+#define pthread_yield() my_pthread_yield()
+#define pthread_join(x, y) my_pthread_join(x, y)
+#define pthread_mutex_init(x, y) my_pthread_mutex_init(x, y)
+#define pthread_mutex_lock(x) my_pthread_mutex_lock(x)
+#define pthread_mutex_unlock(x) my_pthread_mutex_unlock(x)
+#define pthread_mutex_destroy(x) my_pthread_mutex_destroy(x)
+
 #define STACK_SIZE 1024*64
 
 // define the time quantum for the three levels in the multi-level priority queue
@@ -32,7 +41,7 @@
 #define LEVEL2 50000
 #define LEVEL3 100000
 
-// this is me being generous
+// you can ignore this, create as many threads as you want
 #define MAX_THREADS 100  
 
 // define the number of ranks we have
@@ -45,8 +54,7 @@ typedef enum { READY, WAITING, RUNNING, EXITED } state;
 
 typedef uint my_pthread_t;
 
-// this helps us assign thread IDS and keep count of thread numbers 
-int number_of_threads = 0; 
+// this helps us assign thread IDS and keep count of thread numbers  
 
 typedef struct threadControlBlock {
 

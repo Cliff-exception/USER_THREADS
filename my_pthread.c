@@ -10,6 +10,7 @@
 
 // a pointer to the current executing thread
 tcb * current_thread = NULL; 
+int number_of_threads = 0;
 
 void init_main () {
 
@@ -203,7 +204,7 @@ void schedule_threads () {
 
             // put the context back into the queue
             context->thread_state = READY;
-          Insert_to_qeueue(context);
+            Insert_to_qeueue(context);
         }
     }
 
@@ -255,7 +256,7 @@ void schedule_threads () {
         current_thread = to_run; 
         to_run->thread_state = RUNNING; 
 
-        printf("Swaping context between thread %d  and thread %d\n", context->tid, to_run->tid );
+       // printf("Swaping context between thread %d  and thread %d\n", context->tid, to_run->tid );
 
         swapcontext(context->thread_context, to_run->thread_context); 
     }
@@ -273,7 +274,7 @@ void schedule_threads () {
 
 // responsible for catching interrupts
 void timer_interrupt () {
-    printf("Timer went off\n");
+    //printf("Timer went off\n");
     // when going into the scheduler, we must first disable the timer
     struct itimerval timer; 
     getitimer(ITIMER_REAL, &timer); 
@@ -610,7 +611,7 @@ tcb * search_by_tid ( my_pthread_t tid ) {
     return NULL; 
 }
 
-// gives a priority boost to all threads in the 
+// gives a priority boost to all threads in the run queue
 void priority_boost () {
 
     tcb * update = get_tcb(); 
