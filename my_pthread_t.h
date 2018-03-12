@@ -1,10 +1,8 @@
 // File:    my_pthread_t.h
-// Author:  Yujie REN
+// Author:  Clifford Imhomoh
 // Date:    09/23/2017
 
-// name:
-// username of iLab:
-// iLab Server: 
+
 #ifndef MY_PTHREAD_T_H
 #define MY_PTHREAD_T_H
 
@@ -25,7 +23,7 @@
 #include <sys/time.h>
 
 
-#define pthread_create(x, y, z, w) my_pthread_create(x, y, z, w)
+#define pthread_create(w, x, y, z) my_pthread_create(w, x, y, z)
 #define pthread_exit(x) my_pthread_exit(x)
 #define pthread_yield() my_pthread_yield()
 #define pthread_join(x, y) my_pthread_join(x, y)

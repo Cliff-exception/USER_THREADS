@@ -1,10 +1,7 @@
 // File:    my_pthread.c
-// Author:  Yujie REN
+// Author:  Clifford Imhomoh
 // Date:    09/23/2017
 
-// name:
-// username of iLab:
-// iLab Server:
 
 #include "my_pthread_t.h"
 
