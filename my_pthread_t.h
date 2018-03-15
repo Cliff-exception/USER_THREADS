@@ -46,6 +46,7 @@
 #define RANKS 3 
 #define MAX_PRIORITY 2 
 
+
 // enumeration of states 
 typedef enum { READY, WAITING, RUNNING, EXITED } state; 
 
@@ -72,7 +73,8 @@ typedef struct my_pthread_mutex_t {
     unsigned int lock; 
     unsigned int destroyed; 
     my_pthread_t owner; 
-    unsigned int initialized; 
+    unsigned int initialized;
+    tcb * curr_holder;  
 
 } my_pthread_mutex_t;
 
@@ -156,6 +158,8 @@ void schedule_threads(); // this function acts as the main scheduler, its job is
 tcb * search_by_tid ( my_pthread_t tid ); 
 void timer_interrupt () ; 
 tcb * get_tcb ();
+tcb * removed_by_tid ( my_pthread_t tid ); // given a tid, removes the thread with the corresponding tid
+void update_priority ( my_pthread_t tid, unsigned int new_priority ); // given a thread_id and a new priority, this function updates the priority of that thread to the new priority 
 
 
 #endif

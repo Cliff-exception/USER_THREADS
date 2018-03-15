@@ -8,6 +8,8 @@
 // a pointer to the current executing thread
 tcb * current_thread = NULL; 
 int number_of_threads = 0;
+// keep track of number of interrupts for maintenence cycle
+unsigned int num_interrupts = 0;
 
 void init_main () {
 
@@ -154,6 +156,12 @@ void schedule_threads () {
 
     tcb * context = get_running_thread(); 
 
+    // priority boost for every thirty interrupts
+  /*  if ( num_interrupts%30 == 0 ){
+
+        priority_boost(); 
+    } */
+
     //update the time quanta and modify priorities
 
     if ( context-> priority == 0 ) {
@@ -279,6 +287,8 @@ void timer_interrupt () {
     timer.it_value.tv_usec = 0;
     setitimer(ITIMER_REAL, &timer, NULL); 
 
+    num_interrupts++; 
+
     schedule_threads(); 
 }
 
@@ -350,7 +360,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr) {
     tcb * to_join = get_running_thread(); 
 
     tcb * potential_thread = search_by_tid(thread); 
-    // this means that the thread has not exited, so we put our selves on the wait queue
+    // this means that the thread has not exited, so we put this thread on the wait queue
     if ( potential_thread != NULL ) {
 
         to_join->thread_state = WAITING; 
@@ -374,60 +384,58 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr) {
     }
 
 
-    else {
+  
+    // if the first statement is skipped, then it means that the thread has exited, so we simply retrieve the return value
+    return_value * ptr = return_list->head;
+    return_value * prev = NULL; 
 
-        return_value * ptr = return_list->head;
-        return_value * prev = NULL; 
+    while ( ptr != NULL ) {
 
-        while ( ptr != NULL ) {
+        if ( ptr->id == thread )
+            break;
 
-            if ( ptr->id == thread )
-                break;
+        prev = ptr; 
+        ptr = ptr->next; 
+    }
 
-            prev = ptr; 
-            ptr = ptr->next; 
-        }
+    // no return value
+    if ( ptr == NULL )
+        return; 
 
-        // no return value
-        if ( ptr == NULL )
-            return; 
+    // first element in the list
+    if ( prev == NULL ) {
 
-        // first element in the list
-        if ( prev == NULL ) {
+        //only element in the list
+        if ( ptr->next == NULL ) {
 
-            //only element in the list
-            if ( ptr->next == NULL ) {
-
-                *value_ptr = ptr->ret_val;
-                return_list->head = NULL; 
-                return_list->tail = NULL;  
-                free(ptr); 
-                return; 
-            }
-
-            else {
-
-                *value_ptr = ptr->ret_val; 
-                return_list->head = return_list->head->next; 
-                ptr->next = NULL; 
-                free(ptr); 
-                return; 
-            }
-        }
-
-        // not the first element
-
-        else {
-
-            *value_ptr = ptr->ret_val; 
-            prev->next = ptr->next; 
-            ptr->next = NULL; 
+            *value_ptr = ptr->ret_val;
+            return_list->head = NULL; 
+            return_list->tail = NULL;  
             free(ptr); 
             return; 
         }
 
+        else {
 
+            *value_ptr = ptr->ret_val; 
+            return_list->head = return_list->head->next; 
+            ptr->next = NULL; 
+            free(ptr); 
+            return; 
+        }
     }
+
+        // not the first element
+
+    else {
+
+        *value_ptr = ptr->ret_val; 
+        prev->next = ptr->next; 
+        ptr->next = NULL; 
+        free(ptr); 
+        return; 
+    }
+
 
 
     return 0;
@@ -449,6 +457,7 @@ int my_pthread_mutex_init(my_pthread_mutex_t *mutex, const pthread_mutexattr_t *
     mutex->owner =  0;
     mutex->destroyed = 0; 
     mutex->initialized = 0; 
+    mutex->curr_holder = NULL; 
 
     return 0;
 };
@@ -463,6 +472,16 @@ int my_pthread_mutex_lock(my_pthread_mutex_t *mutex) {
         return errno; 
     }
 
+    tcb * owner = get_running_thread(); 
+
+    // handle priority inversion 
+
+    if ( mutex->lock == 1 && (owner->priority > mutex->curr_holder->priority) ) {
+
+        update_priority(mutex->curr_holder->tid, owner->priority); 
+    } 
+
+
     // simple implementation of a spin lock, may need to improve to lower context switching 
     while ( __sync_lock_test_and_set(&mutex->lock, 1) == 1 ){
 
@@ -470,8 +489,8 @@ int my_pthread_mutex_lock(my_pthread_mutex_t *mutex) {
     }
 
     // only the owner of this mutex can unlock it
-    tcb * owner = get_running_thread(); 
     mutex->owner = owner->tid; 
+    mutex->curr_holder = owner; 
 
     return 0;
 };
@@ -585,6 +604,70 @@ tcb * get_tcb () {
 
 // searches through the multi level queue for a specific thread
 
+void update_priority ( my_pthread_t tid, unsigned int new_priority ) {
+
+    // first lets retrieve this thread
+    tcb * boosted = removed_by_tid(tid); 
+    boosted->priority = new_priority; 
+    Insert_to_qeueue(boosted); 
+
+}
+
+
+/* this function is meant to be used in the case of priority inversion 
+    we are assuming that the thread, whose priority we are updating is in the queue
+    the reason for this assumption is because this thread is holding a mutex and we wish to boost its priority
+    we are putting faith on the user to be smart enough to release a mutex before a thread exits
+*/
+tcb * removed_by_tid ( my_pthread_t tid ) {
+
+    int i = 0; 
+    tcb * ptr = NULL;
+    tcb * prev = NULL; 
+
+    while ( i < RANKS ) {
+
+        ptr = Pqueue[i]->head; 
+
+        while ( ptr != NULL ) {
+
+            if ( ptr->tid == tid )
+                break; 
+
+            prev = ptr; 
+            ptr = ptr->next; 
+        }
+
+        if ( ptr->tid == tid )
+            break; 
+
+        i++; 
+    }
+
+    // first check if the thread is at the front of its level 
+
+    if ( prev == NULL ) {
+        // the only element on that level 
+        if ( ptr->next == NULL ) {
+
+            Pqueue[i]->head = NULL; 
+            Pqueue[i]->tail = NULL; 
+            return ptr; 
+        }
+        // not the only element on that level 
+        else {
+
+            Pqueue[i]->head = Pqueue[i]->head->next; 
+            ptr->next = NULL; 
+            return ptr; 
+        }
+    }
+
+    prev->next = ptr->next; 
+    ptr->next = NULL; 
+    return ptr; 
+}
+
 tcb * search_by_tid ( my_pthread_t tid ) {
 
     int i = 0; 
@@ -611,7 +694,8 @@ tcb * search_by_tid ( my_pthread_t tid ) {
 // gives a priority boost to all threads in the run queue
 void priority_boost () {
 
-    tcb * update = get_tcb(); 
+    tcb * update = get_tcb();
+    tcb * first = update;  
 
     while ( update != NULL ) {
 
@@ -625,6 +709,9 @@ void priority_boost () {
         }
 
         update = get_tcb(); 
+
+        if ( update == first )
+            break; 
     }
 
 }
